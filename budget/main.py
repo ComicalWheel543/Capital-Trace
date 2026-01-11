@@ -1,4 +1,5 @@
 from pathlib import Path
+from decimal import Decimal
 
 from budget.ingest.txt_import import load_bofa_txt
 from budget.rules.transfers import remove_internal_transfers
@@ -10,6 +11,7 @@ from budget.reports.burn_rates import monthly_burn_rates
 from budget.reports.projections import project_runway
 from budget.reports.caps import cap_status
 from budget.reports.warnings import envelope_warnings
+from budget.rules.soft_enforcement import simulate_spend
 from budget.config.envelope_priorities import ENVELOPE_PRIORITIES
 from budget.config.envelope_caps import ENVELOPE_CAPS
 
@@ -89,7 +91,32 @@ def main():
             for msg in msgs:
                 print(f"{env:<15} {msg}")
 
+    # ----------------------------
+    # Soft enforcement demo
+    # ----------------------------
+    print("\n=== SOFT ENFORCEMENT SIMULATION ===")
+    test_env = "Discretionary"
+    test_amount = Decimal("50.00")
+
+    spend_warnings = simulate_spend(
+        envelopes,
+        test_env,
+        test_amount,
+        ENVELOPE_CAPS,
+        burn_rates,
+    )
+
+    print(f"Simulating ${test_amount} spend from '{test_env}'")
+
+    if spend_warnings:
+        for w in spend_warnings:
+            print(f"⚠ {w}")
+    else:
+        print("✓ Spend allowed with no warnings")
+
+    # ----------------------------
     # Invariant check
+    # ----------------------------
     envelope_sum = sum(env.balance for env in envelopes.values())
     if envelope_sum != total_cash:
         raise RuntimeError(

@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from models.transaction import Transaction
+from budget.models.transaction import Transaction
 
 
 def load_bofa_csv(path: Path, account_name: str) -> list[Transaction]:

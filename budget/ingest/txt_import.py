@@ -2,14 +2,19 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from models.transaction import Transaction
+from budget.models.transaction import Transaction
 
 
-def load_bofa_txt(path: Path, account_name: str) -> list[Transaction]:
+def load_bofa_txt(path: Path, account_name: str) -> tuple[list[Transaction], Decimal]:
     """
-    Parse a Bank of America TXT statement (fixed-width format).
+    Parse a Bank of America TXT statement (fixed-width / column-aligned format).
+
+    Returns:
+        (transactions, starting_balance)
     """
+
     transactions: list[Transaction] = []
+    starting_balance: Decimal | None = None
 
     with path.open(encoding="utf-8") as f:
         lines = f.readlines()
@@ -31,18 +36,30 @@ def load_bofa_txt(path: Path, account_name: str) -> list[Transaction]:
         if not line.strip():
             continue
 
-        # Skip beginning balance row
+        # Capture beginning balance (do NOT treat as a transaction)
         if "Beginning balance" in line:
+            # Balance is right-aligned at end of line
+            try:
+                starting_balance = Decimal(line.rsplit(maxsplit=1)[-1].replace(",", ""))
+            except Exception as e:
+                raise RuntimeError(f"Failed to parse starting balance:\n{line}") from e
             continue
 
-        # Fixed-width slicing (based on observed format)
-        # Date:        columns 0–10
-        # Description: columns 12–82
-        # Amount:      columns 82–96
+        # ---- TRANSACTION PARSING ----
         try:
-            date_str = line[0:10].strip()
-            desc = line[12:82].strip()
-            amount_str = line[82:96].strip()
+            # Split from the right:
+            # [date + description] [amount] [running balance]
+            parts = line.rsplit(maxsplit=2)
+
+            if len(parts) < 3:
+                raise ValueError("Line does not have expected 3 right-aligned columns")
+
+            amount_str = parts[-2]
+            left = parts[0]
+
+            # Date is always first 10 chars (MM/DD/YYYY)
+            date_str = left[:10]
+            description = left[10:].strip()
 
             txn_date = datetime.strptime(date_str, "%m/%d/%Y").date()
             amount = Decimal(amount_str.replace(",", ""))
@@ -50,14 +67,16 @@ def load_bofa_txt(path: Path, account_name: str) -> list[Transaction]:
             transactions.append(
                 Transaction(
                     date=txn_date,
-                    description=desc,
+                    description=description,
                     amount=amount,
                     account=account_name,
                 )
             )
 
-        except Exception:
-            # Hard fail later if needed; skip malformed lines for now
-            continue
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse transaction line:\n{line}") from e
 
-    return transactions
+    if starting_balance is None:
+        raise RuntimeError("Starting balance not found in statement")
+
+    return transactions, starting_balance

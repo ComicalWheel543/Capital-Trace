@@ -19,8 +19,6 @@ From the project root:
 
 ##### python -m budget.main
 
-This will:
-
 load checking and savings statements
 
 compute current cash state
@@ -29,9 +27,7 @@ allocate envelopes by priority
 
 calculate burn rates and runway
 
-generate optimized envelope goals
-
-print projections and risks
+generate pessimistic (worst-case) envelope goals
 
 ### Scenario Analysis (What-If Experiments)
 Reduce discretionary spending by X%
@@ -45,27 +41,17 @@ Example scenarios:
 
 This mode:
 
-does NOT modify envelopes
+adjusts burn assumptions only
 
-does NOT save state
+recalculates goals and runway
 
-only adjusts assumptions
+does NOT mutate envelopes or save state
 
-recalculates projections and goals
-
-Use this to understand how behavior changes affect survivability.
-
-Important Design Notes
-
-Envelopes represent current intent, not historical spending
-
-Past transactions are used only for burn-rate analysis
-
-All projections are pessimistic by design (worst-case buckets)
-
-No money is ever created or destroyed (hard invariant)
-
-If the invariant fails, the program will exit with an error.
+### Discretionary Drilldown
+Inspect discretionary spending by merchant:
+##### python -m budget.main --discretionary-detail
+This helps identify misaligned or impulse spending patterns.
+ 
 
 ## Development outline
 

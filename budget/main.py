@@ -1,6 +1,5 @@
 from pathlib import Path
 from decimal import Decimal
-import sys
 
 from budget.ingest.txt_import import load_bofa_txt
 from budget.rules.transfers import remove_internal_transfers
@@ -13,6 +12,8 @@ from budget.reports.burn_rates import monthly_burn_rates
 from budget.reports.time_buckets import bucketed_burn_rates
 from budget.reports.goal_optimizer import optimize_goals
 from budget.reports.projections import project_runway
+from budget.reports.spend_breakdown import spend_by_envelope
+from budget.reports.discretionary_detail import discretionary_by_merchant
 
 from budget.scenarios.discretionary_cut import apply_discretionary_cut
 from budget.cli import build_parser, run_discretionary_scenario
@@ -21,7 +22,7 @@ from budget.config.envelope_priorities import ENVELOPE_PRIORITIES
 
 def main():
     # ----------------------------
-    # CLI parsing (scenario mode)
+    # CLI parsing
     # ----------------------------
     parser = build_parser()
     args, _ = parser.parse_known_args()
@@ -52,6 +53,23 @@ def main():
     all_txns = checking_txns + savings_txns
     merged = remove_internal_transfers(all_txns)
     txns = [classify_transaction(apply_overrides(t)) for t in merged]
+
+    # ----------------------------
+    # Spend introspection modes
+    # ----------------------------
+    if args.spend_summary:
+        summary = spend_by_envelope(txns)
+        print("\n=== SPEND BY ENVELOPE ===")
+        for env, total in summary.items():
+            print(f"{env:<15} ${total}")
+        return
+
+    if args.discretionary_detail:
+        detail = discretionary_by_merchant(txns)
+        print("\n=== DISCRETIONARY DETAIL ===")
+        for merchant, total in detail.items():
+            print(f"{merchant:<40} ${total}")
+        return
 
     # ----------------------------
     # Envelopes (current intent)

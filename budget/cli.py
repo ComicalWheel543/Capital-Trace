@@ -49,4 +49,16 @@ def build_parser():
         help="Reduce discretionary burn by X percent",
     )
 
+    parser.add_argument(
+    "--spend-summary",
+    action="store_true",
+    help="Show total spend by envelope",
+    )
+
+    parser.add_argument(
+        "--discretionary-detail",
+        action="store_true",
+        help="Show discretionary spending by merchant",
+    )
+
     return parser

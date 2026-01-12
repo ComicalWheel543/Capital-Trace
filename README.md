@@ -1,7 +1,75 @@
 # Capital-Trace
 Personal Budgeting tool- maybe something in the future
 
-## 1. Scope & Purpose
+## Usage
+
+### Requirements
+- Python 3.11+
+- Bank of America transaction exports (TXT format)
+
+### Project Structure
+Capital-Trace/     
+├── budget/ # Core logic                
+├── data/ # Bank statements (checking.txt, savings.txt)              
+├── docs/ # Design notes              
+└── README.md
+
+### Running the Analysis
+From the project root:
+
+##### python -m budget.main
+
+This will:
+
+load checking and savings statements
+
+compute current cash state
+
+allocate envelopes by priority
+
+calculate burn rates and runway
+
+generate optimized envelope goals
+
+print projections and risks
+
+### Scenario Analysis (What-If Experiments)
+Reduce discretionary spending by X%
+
+To simulate the impact of cutting discretionary spending:
+###### python -m budget.main --cut-discretionary 25
+Example scenarios:
+###### python -m budget.main --cut-discretionary 10
+###### python -m budget.main --cut-discretionary 25
+###### python -m budget.main --cut-discretionary 50
+
+This mode:
+
+does NOT modify envelopes
+
+does NOT save state
+
+only adjusts assumptions
+
+recalculates projections and goals
+
+Use this to understand how behavior changes affect survivability.
+
+Important Design Notes
+
+Envelopes represent current intent, not historical spending
+
+Past transactions are used only for burn-rate analysis
+
+All projections are pessimistic by design (worst-case buckets)
+
+No money is ever created or destroyed (hard invariant)
+
+If the invariant fails, the program will exit with an error.
+
+## Development outline
+
+### 1. Scope & Purpose
 
 This system exists to:
 
@@ -25,7 +93,7 @@ Real-time syncing
 
 Accuracy > convenience. Awareness > automation.
 
-## 2. Account Model (Hard Rules)
+### 2. Account Model (Hard Rules)
 Cash Pool
 
 Checking + Savings are merged into a single Cash Pool
@@ -42,11 +110,11 @@ Credit cards are not cash
 
 Credit card balance is tracked separately from the Cash Pool
 
-## 3. Transaction Types (Exactly Three)
+### 3. Transaction Types (Exactly Three)
 
 Every transaction MUST be classified as one and only one of the following:
 
-### 3.1. Income
+#### 3.1. Income
 
 Definition:
 Money entering the Cash Pool from outside the system.
@@ -69,7 +137,7 @@ Income is assigned to Unallocated
 
 Income does NOT auto-fill envelopes
 
-### 3.2. Spending
+#### 3.2. Spending
 
 Definition:
 Money leaving the system in exchange for goods or services.
@@ -94,7 +162,7 @@ Spending MUST be assigned to exactly one envelope
 
 Spending reduces envelope balance immediately
 
-### 3.3. Transfer
+#### 3.3. Transfer
 
 Definition:
 Money moving internally with no economic impact.
@@ -115,7 +183,7 @@ Transfers do NOT count as income or spending
 
 Transfers exist only for reconciliation and balance tracking
 
-## 4. Envelope System Rules
+### 4. Envelope System Rules
 Envelope Definition
 
 An envelope represents reserved cash with intent.
@@ -148,7 +216,7 @@ Sum of all envelope balances == Cash Pool balance
 
 If this is false, the system is broken.
 
-## 5. Credit Card Rules (No Exceptions)
+### 5. Credit Card Rules (No Exceptions)
 Credit Card Purchases
 
 Treated as spending immediately
@@ -172,7 +240,7 @@ Do NOT touch envelopes
 Rule of Truth:
 You pay for things when you buy them, not when you pay the card.
 
-## 6. Time & Reporting Rules
+### 6. Time & Reporting Rules
 Dates
 
 Use posted date, not authorization date
@@ -185,7 +253,7 @@ Day / week / month are simple rollups
 
 No retroactive reclassification after reconciliation
 
-## 7.  Projection Rules (Future Balance)
+### 7.  Projection Rules (Future Balance)
 Projection Definition
 
 A projection is a deterministic simulation, not a guess.
@@ -212,7 +280,7 @@ Surface lowest balance point
 
 If a projection is wrong, the inputs are wrong — not the math.
 
-## 8.  Workflow Assumptions (Be Honest)
+### 8.  Workflow Assumptions (Be Honest)
 
 CSV imports happen weekly
 
@@ -222,7 +290,7 @@ Perfection is not required, consistency is
 
 If this workflow is skipped, numbers are untrusted.
 
-## 9.  Non-Goals (Explicitly Out of Scope)
+### 9.  Non-Goals (Explicitly Out of Scope)
 
 Investment performance tracking
 

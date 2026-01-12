@@ -13,7 +13,7 @@ from budget.reports.time_buckets import bucketed_burn_rates
 from budget.reports.goal_optimizer import optimize_goals
 from budget.reports.projections import project_runway
 from budget.reports.spend_breakdown import spend_by_envelope
-from budget.reports.discretionary_detail import discretionary_by_merchant
+from budget.reports.discretionary_detail import discretionary_breakdown
 
 from budget.scenarios.discretionary_cut import apply_discretionary_cut
 from budget.cli import build_parser, run_discretionary_scenario
@@ -65,10 +65,18 @@ def main():
         return
 
     if args.discretionary_detail:
-        detail = discretionary_by_merchant(txns)
-        print("\n=== DISCRETIONARY DETAIL ===")
-        for merchant, total in detail.items():
-            print(f"{merchant:<40} ${total}")
+        breakdown = discretionary_breakdown(txns)
+
+        print("\n=== DISCRETIONARY BREAKDOWN ===")
+        for env, merchants in breakdown.items():
+            total = sum(merchants.values())
+            print(f"\n[{env}] Total: ${total:.2f}")
+
+            for merchant, amount in sorted(
+                merchants.items(), key=lambda x: x[1], reverse=True
+            ):
+                print(f"  {merchant:<40} ${amount:.2f}")
+
         return
 
     # ----------------------------

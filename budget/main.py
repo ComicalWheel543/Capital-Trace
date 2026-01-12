@@ -1,156 +1,198 @@
-from pathlib import Path
 from decimal import Decimal
+from pathlib import Path
+import argparse
 
+# =========================
+# INGEST
+# =========================
 from budget.ingest.txt_import import load_bofa_txt
-from budget.rules.transfers import remove_internal_transfers
+from budget.ingest.credit_csv import load_credit_csv
+
+# =========================
+# RULES
+# =========================
+from budget.rules.classify import classify_transactions
 from budget.rules.overrides import apply_overrides
-from budget.rules.classify import classify_transaction
-from budget.rules.envelopes import initial_envelopes, allocate_by_priority
 
-from budget.reports.summary import total_balance
+# =========================
+# MODELS / ENVELOPES
+# =========================
+from budget.models.envelope import Envelope
+from budget.rules.envelopes import initial_envelopes
+
+# =========================
+# REPORTS
+# =========================
+from budget.reports.summary import cash_summary
 from budget.reports.burn_rates import monthly_burn_rates
-from budget.reports.time_buckets import bucketed_burn_rates
-from budget.reports.goal_optimizer import optimize_goals
-from budget.reports.projections import project_runway
-from budget.reports.spend_breakdown import spend_by_envelope
 from budget.reports.discretionary_detail import discretionary_breakdown
+from budget.reports.credit_summary import (
+    credit_balance,
+    credit_spend_by_envelope,
+)
+from budget.reports.credit_warnings import credit_float_warning
 
-from budget.scenarios.discretionary_cut import apply_discretionary_cut
-from budget.cli import build_parser, run_discretionary_scenario
-from budget.config.envelope_priorities import ENVELOPE_PRIORITIES
+# =========================
+# PLANNING (PHASE 5.2)
+# =========================
+from budget.config.income import INCOME_CONFIG
+from budget.config.targets import ENVELOPE_TARGETS
+from budget.config.priorities import (
+    ESSENTIAL_ENVELOPES,
+    DISCRETIONARY_ENVELOPES,
+)
+from budget.planning.requirements import compute_required_funding
+from budget.planning.allocation import allocate_income
 
 
 def main():
-    # ----------------------------
-    # CLI parsing
-    # ----------------------------
-    parser = build_parser()
-    args, _ = parser.parse_known_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--discretionary-detail",
+        action="store_true",
+        help="Show discretionary breakdown by sub-envelope",
+    )
+    args = parser.parse_args()
 
-    # ----------------------------
-    # Load statements
-    # ----------------------------
-    checking_txns, checking_start = load_bofa_txt(
-        Path("data/checking.txt"),
-        "checking",
+    # =========================
+    # CASH INGEST
+    # =========================
+    cash_txns = []
+    cash_txns += load_bofa_txt(Path("data/checking.txt"), "Checking")
+    cash_txns += load_bofa_txt(Path("data/savings.txt"), "Savings")
+
+    # =========================
+    # CLASSIFY + OVERRIDES
+    # =========================
+    cash_txns = classify_transactions(cash_txns)
+    cash_txns = apply_overrides(cash_txns)
+
+    # =========================
+    # CREDIT INGEST (STATEMENT)
+    # =========================
+    credit_txns = load_credit_csv(
+        Path("data/credit.csv"),
+        statement_month="2026-01",
     )
 
-    savings_txns, savings_start = load_bofa_txt(
-        Path("data/savings.txt"),
-        "savings",
-    )
+    # =========================
+    # CASH SUMMARY
+    # =========================
+    cash = cash_summary(cash_txns)
 
-    # ----------------------------
-    # Current cash state
-    # ----------------------------
-    checking_end = checking_start + total_balance(checking_txns)
-    savings_end = savings_start + total_balance(savings_txns)
-    total_cash = checking_end + savings_end
+    print("\n=== CASH ===")
+    print(f"Checking: ${cash['Checking']:.2f}")
+    print(f"Savings:  ${cash['Savings']:.2f}")
+    print(f"Total:    ${cash['Total']:.2f}")
 
-    # ----------------------------
-    # Merge + classify history
-    # ----------------------------
-    all_txns = checking_txns + savings_txns
-    merged = remove_internal_transfers(all_txns)
-    txns = [classify_transaction(apply_overrides(t)) for t in merged]
+    # =========================
+    # CREDIT SUMMARY
+    # =========================
+    credit_total = credit_balance(credit_txns)
 
-    # ----------------------------
-    # Spend introspection modes
-    # ----------------------------
-    if args.spend_summary:
-        summary = spend_by_envelope(txns)
-        print("\n=== SPEND BY ENVELOPE ===")
-        for env, total in summary.items():
-            print(f"{env:<15} ${total}")
-        return
+    print("\n=== CREDIT CARD ===")
+    print(f"Statement Balance: ${credit_total:.2f}")
 
+    # =========================
+    # DISCRETIONARY DETAIL (OPTIONAL)
+    # =========================
     if args.discretionary_detail:
-        breakdown = discretionary_breakdown(txns)
+        breakdown = discretionary_breakdown(cash_txns + credit_txns)
 
         print("\n=== DISCRETIONARY BREAKDOWN ===")
-        for env, merchants in breakdown.items():
+        for env in sorted(breakdown.keys()):
+            merchants = breakdown[env]
             total = sum(merchants.values())
-            print(f"\n[{env}] Total: ${total:.2f}")
 
+            print(f"\n[{env}] Total: ${total:.2f}")
             for merchant, amount in sorted(
-                merchants.items(), key=lambda x: x[1], reverse=True
+                merchants.items(),
+                key=lambda x: x[1],
+                reverse=True,
             ):
                 print(f"  {merchant:<40} ${amount:.2f}")
 
         return
 
-    # ----------------------------
-    # Envelopes (current intent)
-    # ----------------------------
-    envelopes = initial_envelopes(total_cash)
-    allocate_by_priority(envelopes, ENVELOPE_PRIORITIES)
-
-    # ----------------------------
-    # Burn rates
-    # ----------------------------
-    burn_monthly = monthly_burn_rates(txns)
-    burn_weekly = bucketed_burn_rates(txns, 7)
-
-    burn_matrix = {}
-    for env in set(burn_monthly) | set(burn_weekly):
-        burn_matrix[env] = {
-            "monthly": burn_monthly.get(env, Decimal("0.00")),
-            "weekly": burn_weekly.get(env, Decimal("0.00")) * Decimal("4"),
-        }
-
-    # ----------------------------
-    # Scenario: discretionary cut
-    # ----------------------------
-    if args.cut_discretionary is not None:
-        run_discretionary_scenario(
-            envelopes=envelopes,
-            burn_rates=burn_monthly,
-            target_months=Decimal("2.00"),
-            cut_percent=args.cut_discretionary,
-        )
-        return
-
-    # ----------------------------
-    # Goal optimization
-    # ----------------------------
-    target_months = Decimal("2.00")
-    goals = optimize_goals(burn_matrix, target_months)
-
-    # ----------------------------
-    # Projections
-    # ----------------------------
-    runway = project_runway(envelopes, burn_monthly)
-
-    # ----------------------------
-    # Reporting
-    # ----------------------------
-    print("\n=== CASH ===")
-    print(f"Total Cash: ${total_cash}")
+    # =========================
+    # ENVELOPES (CURRENT STATE)
+    # =========================
+    envelopes: dict[str, Envelope] = initial_envelopes(Decimal(cash["Total"]))
 
     print("\n=== CURRENT ENVELOPES ===")
     for env in envelopes.values():
-        print(f"{env.name:<15} ${env.balance}")
+        print(f"{env.name:<22} ${env.balance:.2f}")
 
-    print("\n=== OPTIMIZED GOALS (2-MONTH SURVIVAL) ===")
-    for env, goal in goals.items():
-        current = envelopes.get(env).balance if env in envelopes else Decimal("0.00")
-        delta = goal - current
-        status = "UNDER" if delta > 0 else "OVER"
+    # =========================
+    # BURN RATES
+    # =========================
+    burn_rates = monthly_burn_rates(cash_txns)
+
+    # ADD CREDIT SPEND INTO BURN
+    credit_burn = credit_spend_by_envelope(credit_txns)
+    for env, amt in credit_burn.items():
+        burn_rates[env] = burn_rates.get(env, Decimal("0.00")) + amt
+
+    print("\n=== BURN RATES (MONTHLY) ===")
+    for env, burn in sorted(burn_rates.items()):
+        print(f"{env:<28} ${burn:.2f}")
+
+    # =========================
+    # PHASE 5.2 — INCOME-AWARE PLANNING
+    # =========================
+    monthly_income = INCOME_CONFIG["monthly_amount"]
+
+    required = compute_required_funding(burn_rates, ENVELOPE_TARGETS)
+    allocation = allocate_income(monthly_income, required)
+
+    print("\n=== INCOME ASSUMPTIONS ===")
+    print(f"Monthly Income: ${monthly_income:.2f}")
+
+    print("\n=== MONTHLY FUNDING REQUIREMENTS (HYBRID) ===")
+    for env, amount in required.items():
+        print(f"{env:<28} ${amount:.2f}")
+
+    print("\n=== INCOME ALLOCATION (PRIORITY) ===")
+
+    for env in ESSENTIAL_ENVELOPES:
+        data = allocation.get(env)
+        if not data:
+            continue
+
+        status = "✓" if data["shortfall"] == 0 else "⚠"
         print(
-            f"{env:<15} Goal ${goal} | "
-            f"Current ${current} | "
-            f"{status} by ${abs(delta):.2f}"
+            f"{env:<28} "
+            f"Funded ${data['funded']:.2f} / ${data['required']:.2f} {status}"
         )
 
-    print("\n=== RUNWAY (MONTHS) ===")
-    for env, months in runway.items():
-        print(f"{env:<15} {months}")
+    disc = allocation["DISCRETIONARY_BLOCK"]
 
-    # ----------------------------
-    # Invariant
-    # ----------------------------
-    if sum(e.balance for e in envelopes.values()) != total_cash:
-        raise RuntimeError("Envelope invariant violated")
+    print("\n--- DISCRETIONARY BLOCK ---")
+    print(f"Required: ${disc['required']:.2f}")
+    print(f"Funded:   ${disc['funded']:.2f}")
+
+    if disc["shortfall"] > 0:
+        print(f"⚠ Shortfall: ${disc['shortfall']:.2f}")
+
+        print("\nDiscretionary Drivers:")
+        total_required = sum(
+            required.get(env, Decimal("0.00"))
+            for env in DISCRETIONARY_ENVELOPES
+        )
+
+        for env in DISCRETIONARY_ENVELOPES:
+            amt = required.get(env, Decimal("0.00"))
+            if amt > 0:
+                pct = (amt / total_required) * 100
+                print(f"  {env:<28} ${amt:.2f} ({pct:.1f}%)")
+
+    # =========================
+    # CREDIT FLOAT AWARENESS
+    # =========================
+    credit_float_warning(
+        starting_balance=Decimal("0.00"),
+        ending_balance=credit_total,
+    )
 
 
 if __name__ == "__main__":

@@ -53,3 +53,29 @@ def classify_transaction(txn: Transaction) -> Transaction:
     # Anything else is noise / refunds / weird bank artifacts
     txn.txn_type = TxnType.IGNORED
     return txn
+
+
+def classify_transactions(transactions) -> list[Transaction]:
+    """
+    Classify a list of transactions.
+
+    Accepts:
+    - list[Transaction]
+    - list[list[Transaction]]
+    - mixed lists (filters safely)
+
+    Enforces: only Transaction objects pass through.
+    """
+
+    flattened: list[Transaction] = []
+
+    for item in transactions:
+        if isinstance(item, list):
+            for sub in item:
+                if isinstance(sub, Transaction):
+                    flattened.append(sub)
+        elif isinstance(item, Transaction):
+            flattened.append(item)
+        # everything else (Decimal, None, etc.) is ignored
+
+    return [classify_transaction(txn) for txn in flattened]
